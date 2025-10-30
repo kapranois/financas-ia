@@ -1,0 +1,699 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Controle Financeiro</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<!-- PWA Config -->
+<link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/192/2581/2581675.png">
+<meta name="theme-color" content="#007bff">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Minhas Finanças">
+
+<!-- Ícones Apple -->
+<link rel="apple-touch-icon" href="/static/icon-192.png">
+
+<!-- Para evitar zoom em inputs no iOS -->
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: Arial, sans-serif;
+            background: #f5f5f5;
+            padding: 20px;
+        }
+
+        .app {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        header {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 5px;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        .card {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+
+        h2 {
+            color: #444;
+            margin-bottom: 15px;
+            border-bottom: 2px solid #eee;
+            padding-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 10px;
+        }
+
+        .btn-small {
+            padding: 8px 12px;
+            font-size: 14px;
+            width: auto;
+        }
+
+        .btn-icon {
+            padding: 8px;
+            width: 40px;
+            background: #6c757d;
+        }
+
+        .btn-icon:hover {
+            background: #5a6268;
+        }
+
+        .btn-success {
+            background: #28a745;
+        }
+
+        .btn-success:hover {
+            background: #218838;
+        }
+
+        input, button {
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 16px;
+        }
+
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        button:hover {
+            background: #0056b3;
+        }
+
+        .list {
+            margin-top: 15px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .item_lista {
+            padding: 8px;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .resumo {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 15px;
+        }
+
+        .resumo_item {
+            margin-bottom: 8px;
+            padding: 5px;
+            border-radius: 3px;
+        }
+
+        .positivo { background: #d4edda; color: #155724; }
+        .negativo { background: #f8d7da; color: #721c24; }
+
+        .grafico_container {
+            height: 300px;
+            position: relative;
+        }
+
+        .chat_box {
+            height: 200px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 10px;
+            margin-bottom: 10px;
+            overflow-y: auto;
+            background: #f9f9f9;
+        }
+
+        .user_msg { color: #007bff; margin-bottom: 5px; }
+        .bot_msg { color: #28a745; margin-bottom: 5px; }
+
+        .fixa_item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .fixa_item label {
+            width: 120px;
+            margin-right: 10px;
+        }
+
+        .fixa_item input {
+            flex: 1;
+            margin-bottom: 0;
+        }
+
+        /* Modal Styles */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+        }
+
+        .modal-content {
+            background-color: white;
+            margin: 5% auto;
+            padding: 20px;
+            border-radius: 10px;
+            width: 90%;
+            max-width: 600px;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+
+        .close {
+            color: #aaa;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        .close:hover {
+            color: black;
+        }
+
+        .modal-header {
+            margin-bottom: 20px;
+        }
+
+        .periodo-selector {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .periodo-selector select {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+
+        .relatorio-detalhes {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 15px;
+        }
+
+        .relatorio-item {
+            padding: 8px;
+            border-bottom: 1px solid #ddd;
+        }
+
+        .relatorio-total {
+            background: #e9ecef;
+            padding: 10px;
+            border-radius: 5px;
+            text-align: center;
+            font-weight: bold;
+            margin-top: 15px;
+        }
+
+        .comprovante-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px;
+            border-bottom: 1px solid #eee;
+            margin-bottom: 5px;
+        }
+
+        .comprovante-info {
+            flex: 1;
+        }
+
+        .comprovante-actions {
+            display: flex;
+            gap: 5px;
+        }
+
+        footer {
+            text-align: center;
+            margin-top: 20px;
+            color: #666;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="app">
+        <header>
+            <h1>💰 Controle Financeiro</h1>
+            <p>Controle suas entradas, gastos e dívidas</p>
+        </header>
+
+        <div class="grid">
+            <!-- Coluna Esquerda -->
+            <div class="panel">
+                <!-- Entradas -->
+<div class="card">
+    <div class="card-header">
+        <h2>➕ Entradas</h2>
+        <div class="btn-group">
+            <button class="btn-icon btn-success" onclick="abrirModalContracheques()">📄</button>
+        </div>
+    </div>
+    <input type="text" id="entrada_desc" placeholder="Descrição (ex: Salário)">
+    <input type="number" step="0.01" id="entrada_val" placeholder="Valor (R$)">
+    <button class="btn-small" id="btn_add_entrada">Adicionar</button>
+    <div class="list" id="lista_entradas"></div>
+</div>
+                <!-- Modal para Contracheques -->
+<div id="modalContracheques" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <span class="close" onclick="fecharModalContracheques()">&times;</span>
+            <h2>📄 Meus Contracheques</h2>
+        </div>
+
+        <!-- Upload de Contracheque -->
+        <div style="margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 5px;">
+            <h3>📤 Novo Contracheque</h3>
+            <input type="text" id="contracheque_mes" placeholder="Mês (ex: Janeiro 2024)" style="margin-bottom: 10px;">
+            <input type="file" id="contracheque_arquivo" accept=".pdf" onchange="validarPDF(this)" style="margin-bottom: 10px;">
+            <button class="btn-small" onclick="uploadContracheque()" style="background: #28a745;">
+                📎 Upload Contracheque
+            </button>
+        </div>
+
+        <!-- Filtros -->
+        <div class="periodo-selector">
+            <input type="text" id="filtro_ano_contracheque" placeholder="Filtrar por ano (ex: 2024)"
+                   onkeyup="filtrarContracheques()">
+            <button class="btn-small" onclick="limparFiltrosContracheques()">🔄 Limpar</button>
+        </div>
+
+        <!-- Lista de Contracheques -->
+        <div id="lista_completa_contracheques" style="margin-top: 15px; max-height: 400px; overflow-y: auto;"></div>
+    </div>
+</div>
+
+                <!-- Gastos -->
+                <div class="card">
+                    <div class="card-header">
+                        <h2>➖ Gastos</h2>
+                        <div class="btn-group">
+                            <button class="btn-icon" onclick="abrirRelatorio('gastos')">📊</button>
+                        </div>
+                    </div>
+                    <input type="text" id="gasto_desc" placeholder="Descrição (ex: Supermercado)">
+                    <input type="text" id="gasto_cat" placeholder="Categoria (ex: Alimentação)">
+                    <input type="number" step="0.01" id="gasto_val" placeholder="Valor (R$)">
+                    <button class="btn-small" id="btn_add_gasto">Adicionar</button>
+                    <div class="list" id="lista_gastos"></div>
+                </div>
+
+                <!-- Dívidas -->
+                <div class="card">
+                    <div class="card-header">
+                        <h2>📋 Dívidas</h2>
+                        <div class="btn-group">
+                            <button class="btn-icon" onclick="abrirRelatorio('dividas')">📊</button>
+                            <button class="btn-icon btn-success" onclick="abrirModalComprovantes('divida')">💾</button>
+                        </div>
+                    </div>
+                    <input type="text" id="div_desc" placeholder="Descrição (ex: Cartão)">
+                    <input type="number" step="0.01" id="div_val" placeholder="Valor (R$)">
+                    <input type="date" id="div_venc">
+                    <button class="btn-small" id="btn_add_divida">Adicionar</button>
+                    <div class="list" id="lista_dividas"></div>
+                </div>
+            </div>
+
+            <!-- Coluna Direita -->
+            <div class="content">
+                <!-- Despesas Fixas -->
+                <div class="card">
+                    <div class="card-header">
+                        <h2>🏠 Despesas Fixas</h2>
+                        <div class="btn-group">
+                            <button class="btn-icon" onclick="abrirRelatorio('fixas')">📊</button>
+                            <button class="btn-icon btn-success" onclick="abrirModalComprovantes('fixa')">💾</button>
+                        </div>
+                    </div>
+                    <div class="fixa_item">
+                        <label>Internet:</label>
+                        <input type="number" step="0.01" id="fixa_internet" placeholder="R$ 0,00">
+                    </div>
+                    <div class="fixa_item">
+                        <label>Energia:</label>
+                        <input type="number" step="0.01" id="fixa_energia" placeholder="R$ 0,00">
+                    </div>
+                    <div class="fixa_item">
+                        <label>Aluguel:</label>
+                        <input type="number" step="0.01" id="fixa_apartamento" placeholder="R$ 0,00">
+                    </div>
+                    <div class="fixa_item">
+                        <label>Gás:</label>
+                        <input type="number" step="0.01" id="fixa_gas" placeholder="R$ 0,00">
+                    </div>
+                    <div class="fixa_item">
+                        <label>Outros:</label>
+                        <input type="number" step="0.01" id="fixa_pensao" placeholder="R$ 0,00">
+                    </div>
+                    <button class="btn-small" id="btn_salvar_fixas">Salvar</button>
+                </div>
+
+                <!-- Resumo -->
+                <div class="card">
+                    <div class="card-header">
+                        <h2>📊 Resumo Geral</h2>
+                        <div class="btn-group">
+                            <button class="btn-icon" onclick="abrirRelatorio('geral')">📊</button>
+                        </div>
+                    </div>
+                    <div id="resumo" class="resumo"></div>
+                    <div id="dicas"></div>
+                    <button class="btn-small" id="btn_consultar">Atualizar</button>
+                </div>
+
+                <!-- Gráfico de Gastos -->
+                <div class="card">
+                    <div class="card-header">
+                        <h2>📊 Distribuição de Gastos</h2>
+                        <div class="btn-group">
+                            <button class="btn-icon" onclick="exportarGrafico()">📊</button>
+                        </div>
+                    </div>
+                    <div class="grafico_container">
+                        <canvas id="graficoGastos"></canvas>
+                    </div>
+                    <div id="infoGrafico" style="margin-top: 10px;"></div>
+                    <div style="text-align: center; margin-top: 10px;">
+                        <small>💡 Clique em uma fatia para ver detalhes</small>
+                    </div>
+                </div>
+
+                <!-- Chat -->
+                <div class="card">
+                    <h2>🤖 Assistente</h2>
+                    <div id="chat_box" class="chat_box"></div>
+                    <input type="text" id="chat_msg" placeholder="Digite sua mensagem...">
+                    <button class="btn-small" id="btn_enviar_chat">Enviar</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Modal para Relatórios -->
+        <div id="modalRelatorio" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <span class="close" onclick="fecharModal()">&times;</span>
+                    <h2 id="modalTitulo">Relatório</h2>
+                </div>
+
+                <div class="periodo-selector">
+                    <select id="selectMes">
+                        <option value="">Selecione o mês</option>
+                        <option value="01">Janeiro</option>
+                        <option value="02">Fevereiro</option>
+                        <option value="03">Março</option>
+                        <option value="04">Abril</option>
+                        <option value="05">Maio</option>
+                        <option value="06">Junho</option>
+                        <option value="07">Julho</option>
+                        <option value="08">Agosto</option>
+                        <option value="09">Setembro</option>
+                        <option value="10">Outubro</option>
+                        <option value="11">Novembro</option>
+                        <option value="12">Dezembro</option>
+                    </select>
+
+                    <select id="selectAno">
+                        <option value="">Selecione o ano</option>
+                        <option value="2023">2023</option>
+                        <option value="2024">2024</option>
+                        <option value="2025">2025</option>
+                    </select>
+
+                    <button class="btn-small" onclick="gerarRelatorio()">Gerar Relatório</button>
+                </div>
+                <div style="text-align: center; margin: 15px 0;">
+                    <button class="btn-small" onclick="exportarPDF()"
+                            style="background: #dc3545; width: auto;">
+                        📄 Exportar PDF
+                    </button>
+                </div>
+
+                <div id="relatorioConteudo"></div>
+            </div>
+        </div>
+
+        <!-- Modal para Comprovantes -->
+        <div id="modalComprovantes" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <span class="close" onclick="fecharModalComprovantes()">&times;</span>
+                    <h2 id="modalComprovantesTitulo">📎 Comprovantes</h2>
+                </div>
+
+                <!-- Upload de Comprovante -->
+                <div style="margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 5px;">
+                    <h3>📤 Upload de Comprovante</h3>
+                    <input type="text" id="comprovante_desc" placeholder="Descrição (ex: Pagamento Internet)">
+                    <div class="periodo-selector">
+                        <select id="comprovante_mes">
+                            <option value="">Mês</option>
+                            <option value="01">Janeiro</option>
+                            <option value="02">Fevereiro</option>
+                            <option value="03">Março</option>
+                            <option value="04">Abril</option>
+                            <option value="05">Maio</option>
+                            <option value="06">Junho</option>
+                            <option value="07">Julho</option>
+                            <option value="08">Agosto</option>
+                            <option value="09">Setembro</option>
+                            <option value="10">Outubro</option>
+                            <option value="11">Novembro</option>
+                            <option value="12">Dezembro</option>
+                        </select>
+                        <select id="comprovante_ano">
+                            <option value="">Ano</option>
+                            <option value="2023">2023</option>
+                            <option value="2024">2024</option>
+                            <option value="2025">2025</option>
+                        </select>
+                    </div>
+                    <input type="file" id="comprovante_arquivo"
+                        accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                            onchange="validarArquivo(this)">
+                    <button class="btn-small" onclick="uploadComprovante()" style="background: #28a745;">
+                        📎 Upload Comprovante
+                    </button>
+                </div>
+
+                <!-- Lista de Comprovantes -->
+                <div>
+                    <h3>📋 Comprovantes Salvos</h3>
+                    <div class="periodo-selector">
+                        <select id="filtro_mes" onchange="filtrarComprovantes()">
+                            <option value="">Todos os meses</option>
+                            <option value="01">Janeiro</option>
+                            <option value="02">Fevereiro</option>
+                            <option value="03">Março</option>
+                            <option value="04">Abril</option>
+                            <option value="05">Maio</option>
+                            <option value="06">Junho</option>
+                            <option value="07">Julho</option>
+                            <option value="08">Agosto</option>
+                            <option value="09">Setembro</option>
+                            <option value="10">Outubro</option>
+                            <option value="11">Novembro</option>
+                            <option value="12">Dezembro</option>
+                        </select>
+                        <select id="filtro_ano" onchange="filtrarComprovantes()">
+                            <option value="">Todos os anos</option>
+                            <option value="2023">2023</option>
+                            <option value="2024">2024</option>
+                            <option value="2025">2025</option>
+                        </select>
+                    </div>
+                    <div id="lista_comprovantes" style="margin-top: 15px;"></div>
+                </div>
+            </div>
+        </div>
+<!-- Modal para Contracheques -->
+<div id="modalContracheques" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <span class="close" onclick="fecharModalContracheques()">&times;</span>
+            <h2>📄 Meus Contracheques</h2>
+        </div>
+
+        <!-- Upload de Contracheque -->
+        <div style="margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 5px;">
+            <h3>📤 Novo Contracheque</h3>
+            <input type="text" id="contracheque_mes" placeholder="Mês (ex: Janeiro 2024)" style="margin-bottom: 10px;">
+            <input type="file" id="contracheque_arquivo" accept=".pdf" onchange="validarPDF(this)" style="margin-bottom: 10px;">
+            <button class="btn-small" onclick="uploadContracheque()" style="background: #28a745;">
+                📎 Upload Contracheque
+            </button>
+        </div>
+
+        <!-- Filtros -->
+        <div class="periodo-selector">
+            <input type="text" id="filtro_ano_contracheque" placeholder="Filtrar por ano (ex: 2024)"
+                   onkeyup="filtrarContracheques()">
+            <button class="btn-small" onclick="limparFiltrosContracheques()">🔄 Limpar</button>
+        </div>
+
+        <!-- Lista de Contracheques -->
+        <div id="lista_completa_contracheques" style="margin-top: 15px; max-height: 400px; overflow-y: auto;"></div>
+    </div>
+</div>
+        <footer>
+            <small>Sistema de Controle Financeiro - Desenvolvido com Flask</small>
+        </footer>
+    </div>
+
+    <script src="/static/script.js"></script>
+
+</body>
+<script>
+// Registrar Service Worker
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', function() {
+    navigator.serviceWorker.register('/static/sw.js')
+      .then(function(registration) {
+        console.log('✅ Service Worker registrado com sucesso:', registration.scope);
+      })
+      .catch(function(error) {
+        console.log('❌ Falha no Service Worker:', error);
+      });
+  });
+}
+
+// Detectar se é mobile e mostrar botão de instalação
+let deferredPrompt;
+window.addEventListener('beforeinstallprompt', (e) => {
+  deferredPrompt = e;
+  mostrarBotaoInstalar();
+});
+
+function mostrarBotaoInstalar() {
+  const botao = document.createElement('button');
+  botao.textContent = '📱 Instalar App';
+  botao.style.cssText = `
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background: #007bff;
+    color: white;
+    border: none;
+    padding: 10px 15px;
+    border-radius: 20px;
+    font-size: 14px;
+    z-index: 1000;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+  `;
+  botao.onclick = instalarApp;
+  document.body.appendChild(botao);
+}
+
+async function instalarApp() {
+  if (deferredPrompt) {
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    if (outcome === 'accepted') {
+      console.log('🎉 App instalado!');
+    }
+    deferredPrompt = null;
+  }
+}
+
+// Variáveis globais para comprovantes
+let tipoComprovanteAtual = '';
+
+function abrirModalComprovantes(tipo) {
+    tipoComprovanteAtual = tipo;
+    const modal = document.getElementById('modalComprovantes');
+    const titulo = document.getElementById('modalComprovantesTitulo');
+
+    titulo.textContent = tipo === 'fixa' ? '📎 Comprovantes - Despesas Fixas' : '📎 Comprovantes - Dívidas';
+    modal.style.display = 'block';
+
+    // Limpar campos
+    document.getElementById('comprovante_desc').value = '';
+    document.getElementById('comprovante_mes').value = '';
+    document.getElementById('comprovante_ano').value = '';
+    document.getElementById('comprovante_arquivo').value = '';
+
+    // Carregar comprovantes
+    carregarComprovantes();
+}
+
+function fecharModalComprovantes() {
+    document.getElementById('modalComprovantes').style.display = 'none';
+}
+
+// Fechar modal ao clicar fora
+window.onclick = function(event) {
+    const modalRelatorio = document.getElementById('modalRelatorio');
+    const modalComprovantes = document.getElementById('modalComprovantes');
+
+    if (event.target == modalRelatorio) {
+        fecharModal();
+    }
+    if (event.target == modalComprovantes) {
+        fecharModalComprovantes();
+    }
+}
+</script>
+</html>

@@ -1,84 +1,132 @@
 from flask import Flask, render_template, request, jsonify, send_file
-import sqlite3
-from datetime import datetime
 import os
 import re
 import base64
 import io
 import pdfplumber
 
+# Import para PostgreSQL com fallback para SQLite
+try:
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
+    POSTGRES_AVAILABLE = True
+    print("✅ PostgreSQL disponível")
+except ImportError:
+    POSTGRES_AVAILABLE = False
+    import sqlite3
+    print("ℹ️ Usando SQLite (PostgreSQL não disponível)")
+
 app = Flask(__name__)
 
 # =============================================
-# CONFIGURAÇÃO OTIMIZADA PARA RENDER
+# CONFIGURAÇÃO PARA POSTGRESQL NO RENDER
 # =============================================
-# No Render, o banco fica na raiz do projeto
-db_file = os.path.join(os.path.dirname(__file__), 'financas.db')
+DATABASE_URL = os.environ.get('DATABASE_URL')
 
 def get_db_connection():
-    """Conexão otimizada com o banco"""
-    conn = sqlite3.connect(db_file)
-    conn.row_factory = sqlite3.Row
-    return conn
+    """Conecta com PostgreSQL ou SQLite como fallback"""
+    if DATABASE_URL and POSTGRES_AVAILABLE:
+        # PostgreSQL no Render
+        conn = psycopg2.connect(DATABASE_URL, sslmode='require')
+        conn.cursor_factory = RealDictCursor
+        return conn
+    else:
+        # SQLite local (fallback)
+        import sqlite3
+        db_file = os.path.join(os.path.dirname(__file__), 'financas.db')
+        conn = sqlite3.connect(db_file)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+def execute_query(query, params=()):
+    """Executa query de forma compatível com ambos os bancos"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    try:
+        # Ajusta a query para PostgreSQL se necessário
+        if DATABASE_URL and POSTGRES_AVAILABLE:
+            query = query.replace('?', '%s')
+            query = query.replace('INSERT OR REPLACE', 'INSERT')
+            query = query.replace('BLOB', 'BYTEA')
+        
+        cursor.execute(query, params)
+        
+        if query.strip().upper().startswith('SELECT'):
+            result = cursor.fetchall()
+        else:
+            conn.commit()
+            result = cursor.rowcount
+            
+        return result
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        conn.close()
 
 def init_db():
     """Inicializa todas as tabelas do banco"""
     try:
-        conn = get_db_connection()
-        
-        # TABELAS EXISTENTES
-        conn.execute('''CREATE TABLE IF NOT EXISTS entradas(
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+        # Tabela de entradas
+        execute_query('''CREATE TABLE IF NOT EXISTS entradas(
+            id SERIAL PRIMARY KEY,
             descricao TEXT,
             valor REAL,
             data TEXT DEFAULT CURRENT_TIMESTAMP
         )''')
 
-        conn.execute('''CREATE TABLE IF NOT EXISTS gastos(
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+        # Tabela de gastos
+        execute_query('''CREATE TABLE IF NOT EXISTS gastos(
+            id SERIAL PRIMARY KEY,
             descricao TEXT,
             categoria TEXT,
             valor REAL,
             data TEXT DEFAULT CURRENT_TIMESTAMP
         )''')
 
-        conn.execute('''CREATE TABLE IF NOT EXISTS dividas(
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+        # Tabela de dívidas
+        execute_query('''CREATE TABLE IF NOT EXISTS dividas(
+            id SERIAL PRIMARY KEY,
             descricao TEXT,
             valor REAL,
             vencimento TEXT,
             data TEXT DEFAULT CURRENT_TIMESTAMP
         )''')
 
-        conn.execute('''CREATE TABLE IF NOT EXISTS fixas(
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+        # Tabela de fixas
+        execute_query('''CREATE TABLE IF NOT EXISTS fixas(
+            id SERIAL PRIMARY KEY,
             nome TEXT UNIQUE,
             valor REAL
         )''')
 
         # TABELA PARA COMPROVANTES
-        conn.execute('''CREATE TABLE IF NOT EXISTS comprovantes(
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+        execute_query('''CREATE TABLE IF NOT EXISTS comprovantes(
+            id SERIAL PRIMARY KEY,
             tipo TEXT,
             descricao TEXT,
             mes_ano TEXT,
             arquivo_nome TEXT,
-            arquivo_dados BLOB,
+            arquivo_dados BYTEA,
             data_upload TEXT DEFAULT CURRENT_TIMESTAMP
         )''')
 
         # TABELA PARA CONTRACHEQUES
-        conn.execute('''CREATE TABLE IF NOT EXISTS contracheques(
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+        execute_query('''CREATE TABLE IF NOT EXISTS contracheques(
+            id SERIAL PRIMARY KEY,
             mes TEXT,
             arquivo_nome TEXT,
-            arquivo_dados BLOB,
+            arquivo_dados BYTEA,
             data_upload TEXT DEFAULT CURRENT_TIMESTAMP
         )''')
 
-        conn.commit()
-        conn.close()
-        print("✅ Banco inicializado com sucesso no Render!")
+        print("✅ Banco inicializado com sucesso!")
+        if DATABASE_URL:
+            print("📊 Usando PostgreSQL no Render")
+        else:
+            print("💾 Usando SQLite local")
+            
     except Exception as e:
         print(f"❌ Erro ao criar banco: {e}")
 
@@ -86,15 +134,11 @@ def init_db():
 init_db()
 
 # =============================================
-# FUNÇÕES OTIMIZADAS
+# FUNÇÕES OTIMIZADAS (COMPATÍVEIS COM AMBOS)
 # =============================================
 def adicionar_entrada(desc, valor):
     try:
-        conn = get_db_connection()
-        conn.execute('INSERT INTO entradas (descricao, valor) VALUES (?, ?)',
-                   (desc, valor))
-        conn.commit()
-        conn.close()
+        execute_query('INSERT INTO entradas (descricao, valor) VALUES (?, ?)', (desc, valor))
         print(f"✅ Entrada adicionada: {desc} - R${valor}")
         return True
     except Exception as e:
@@ -103,11 +147,7 @@ def adicionar_entrada(desc, valor):
 
 def adicionar_gasto(desc, cat, valor):
     try:
-        conn = get_db_connection()
-        conn.execute('INSERT INTO gastos (descricao, categoria, valor) VALUES (?, ?, ?)',
-                   (desc, cat, valor))
-        conn.commit()
-        conn.close()
+        execute_query('INSERT INTO gastos (descricao, categoria, valor) VALUES (?, ?, ?)', (desc, cat, valor))
         print(f"✅ Gasto adicionado: {desc} - {cat} - R${valor}")
         return True
     except Exception as e:
@@ -116,12 +156,7 @@ def adicionar_gasto(desc, cat, valor):
 
 def excluir_entrada_completa(desc):
     try:
-        conn = get_db_connection()
-        cursor = conn.execute('DELETE FROM entradas WHERE descricao LIKE ?', (f'%{desc}%',))
-        deleted = cursor.rowcount
-        conn.commit()
-        conn.close()
-        
+        deleted = execute_query('DELETE FROM entradas WHERE descricao LIKE ?', (f'%{desc}%',))
         if deleted > 0:
             print(f"✅ {deleted} entrada(s) deletada(s): {desc}")
             return True
@@ -134,12 +169,7 @@ def excluir_entrada_completa(desc):
 
 def excluir_gasto_completo(desc):
     try:
-        conn = get_db_connection()
-        cursor = conn.execute('DELETE FROM gastos WHERE descricao LIKE ?', (f'%{desc}%',))
-        deleted = cursor.rowcount
-        conn.commit()
-        conn.close()
-        
+        deleted = execute_query('DELETE FROM gastos WHERE descricao LIKE ?', (f'%{desc}%',))
         if deleted > 0:
             print(f"✅ {deleted} gasto(s) deletado(s): {desc}")
             return True
@@ -152,12 +182,7 @@ def excluir_gasto_completo(desc):
 
 def excluir_divida_completa(desc):
     try:
-        conn = get_db_connection()
-        cursor = conn.execute('DELETE FROM dividas WHERE descricao LIKE ?', (f'%{desc}%',))
-        deleted = cursor.rowcount
-        conn.commit()
-        conn.close()
-        
+        deleted = execute_query('DELETE FROM dividas WHERE descricao LIKE ?', (f'%{desc}%',))
         if deleted > 0:
             print(f"✅ {deleted} dívida(s) deletada(s): {desc}")
             return True
@@ -173,13 +198,10 @@ def excluir_divida_completa(desc):
 # =============================================
 def salvar_comprovante(tipo, descricao, mes_ano, arquivo_nome, arquivo_dados):
     try:
-        conn = get_db_connection()
-        conn.execute('''INSERT INTO comprovantes
+        execute_query('''INSERT INTO comprovantes
                     (tipo, descricao, mes_ano, arquivo_nome, arquivo_dados)
                     VALUES (?, ?, ?, ?, ?)''',
                  (tipo, descricao, mes_ano, arquivo_nome, arquivo_dados))
-        conn.commit()
-        conn.close()
         print(f"✅ Comprovante salvo: {descricao} - {mes_ano}")
         return True
     except Exception as e:
@@ -188,27 +210,16 @@ def salvar_comprovante(tipo, descricao, mes_ano, arquivo_nome, arquivo_dados):
 
 def listar_comprovantes(mes_ano=None):
     try:
-        conn = get_db_connection()
-        
         if mes_ano and mes_ano != 'todos':
-            comprovantes = conn.execute('''SELECT id, tipo, descricao, mes_ano, arquivo_nome, data_upload
-                        FROM comprovantes WHERE mes_ano = ? ORDER BY data_upload DESC''', (mes_ano,)).fetchall()
+            comprovantes = execute_query('''SELECT id, tipo, descricao, mes_ano, arquivo_nome, data_upload
+                        FROM comprovantes WHERE mes_ano = ? ORDER BY data_upload DESC''', (mes_ano,))
         else:
-            comprovantes = conn.execute('''SELECT id, tipo, descricao, mes_ano, arquivo_nome, data_upload
-                        FROM comprovantes ORDER BY data_upload DESC''').fetchall()
+            comprovantes = execute_query('''SELECT id, tipo, descricao, mes_ano, arquivo_nome, data_upload
+                        FROM comprovantes ORDER BY data_upload DESC''')
         
-        conn.close()
-        
-        return [{
-            'id': row[0],
-            'tipo': row[1],
-            'descricao': row[2],
-            'mes_ano': row[3],
-            'arquivo_nome': row[4],
-            'data_upload': row[5]
-        } for row in comprovantes]
+        return [dict(row) for row in comprovantes]
     except Exception as e:
-        print(f"❌ Erro ao listar comprovantes: {e}")
+        print(f"❌ Erro ao listar compprovantes: {e}")
         return []
 
 # =============================================
@@ -237,17 +248,13 @@ def processar_delecao_simples(msg):
 
 def gerar_analise_simples():
     try:
-        conn = get_db_connection()
-
-        entradas = conn.execute('SELECT COALESCE(SUM(valor), 0) FROM entradas').fetchone()[0] or 0
-        gastos = conn.execute('SELECT COALESCE(SUM(valor), 0) FROM gastos').fetchone()[0] or 0
-        fixas = conn.execute('SELECT COALESCE(SUM(valor), 0) FROM fixas').fetchone()[0] or 0
-        dividas = conn.execute('SELECT COALESCE(SUM(valor), 0) FROM dividas').fetchone()[0] or 0
+        entradas = execute_query('SELECT COALESCE(SUM(valor), 0) FROM entradas')[0][0] or 0
+        gastos = execute_query('SELECT COALESCE(SUM(valor), 0) FROM gastos')[0][0] or 0
+        fixas = execute_query('SELECT COALESCE(SUM(valor), 0) FROM fixas')[0][0] or 0
+        dividas = execute_query('SELECT COALESCE(SUM(valor), 0) FROM dividas')[0][0] or 0
 
         total_gastos = gastos + fixas
         saldo = entradas - total_gastos
-
-        conn.close()
 
         if saldo > 0:
             return f"💰 **Situação Positiva!**\n\n📥 Entradas: R$ {entradas:.2f}\n📤 Gastos: R$ {total_gastos:.2f}\n✅ Saldo: R$ {saldo:.2f}"

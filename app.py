@@ -69,6 +69,7 @@ def execute_query(query, params=()):
 def init_db():
     """Inicializa todas as tabelas do banco"""
     try:
+        conn = get_db_connection()
         # Tabela de entradas
         execute_query('''CREATE TABLE IF NOT EXISTS entradas(
             id SERIAL PRIMARY KEY,
@@ -130,7 +131,20 @@ def init_db():
             
     except Exception as e:
         print(f"❌ Erro ao criar banco: {e}")
-
+    # NOVA TABELA PARA TOKENS BANCÁRIOS
+    conn.execute('''CREATE TABLE IF NOT EXISTS bancos_tokens(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            banco TEXT,
+            access_token TEXT,
+            expires_at TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )''')
+        
+        conn.commit()
+        conn.close()
+        print("✅ Banco inicializado com tabela de tokens bancários!")
+    except Exception as e:
+        print(f"❌ Erro ao criar banco: {e}")
 # Inicializar banco ao iniciar
 init_db()
 

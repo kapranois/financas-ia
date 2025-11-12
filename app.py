@@ -4,6 +4,7 @@ import re
 import base64
 import io
 import pdfplumber
+from banking_itau import ItauOpenBanking
 
 # Import para PostgreSQL com fallback para SQLite
 try:
@@ -459,6 +460,197 @@ def grafico_dados():
             'labels': ['Erro'],
             'valores': [1]
         }), 500
+
+@app.route('/conectar_itau')
+def conectar_itau():
+    """Inicia processo de conexão com Itaú"""
+    try:
+        # Configurações - você vai conseguir estas no developer portal
+        client_id = os.environ.get('ITAU_CLIENT_ID', 'seu_client_id_aqui')
+        client_secret = os.environ.get('ITAU_CLIENT_SECRET', 'seu_client_secret_aqui')
+        
+        itau_api = ItauOpenBanking(
+            client_id=client_id,
+            client_secret=client_secret,
+            certificate_path="certificates/cert.pem",  # Você vai precisar disso depois
+            private_key_path="certificates/key.pem"    # Para produção
+        )
+        
+        auth_url = itau_api.get_auth_url()
+        # Salva a instância na session (em produção use Redis ou database)
+        # session['itau_api'] = itau_api  # Descomente quando configurar sessions
+        
+        return jsonify({'auth_url': auth_url})
+        
+    except Exception as e:
+        print(f"❌ Erro conectar Itaú: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/callback')
+def callback():
+    """Callback do OAuth - o Itaú redireciona para aqui"""
+    try:
+        authorization_code = request.args.get('code')
+        
+        if not authorization_code:
+            return "❌ Código de autorização não recebido"
+        
+        # Recupera a instância do Itaú (em produção, use session/database)
+        # itau_api = session.get('itau_api')
+        # Por enquanto, vamos criar uma nova instância:
+        
+        client_id = os.environ.get('ITAU_CLIENT_ID', 'seu_client_id_aqui')
+        client_secret = os.environ.get('ITAU_CLIENT_SECRET', 'seu_client_secret_aqui')
+        
+        itau_api = ItauOpenBanking(
+            client_id=client_id,
+            client_secret=client_secret,
+            certificate_path="certificates/cert.pem",
+            private_key_path="certificates/key.pem"
+        )
+        
+        if itau_api.exchange_code_for_token(authorization_code):
+            # Salvar o token no banco de dados para este usuário
+            conn = get_db_connection()
+            conn.execute('''INSERT OR REPLACE INTO bancos_tokens 
+                         (banco, access_token, expires_at) 
+                         VALUES (?, ?, ?)''',
+                      ('itau', itau_api.access_token, itau_api.token_expires))
+            conn.commit()
+            conn.close()
+            
+            return '''
+            <h2>✅ Conectado com Itaú com sucesso!</h2>
+            <p>Você já pode fechar esta janela e voltar para o app.</p>
+            <script>
+                setTimeout(() => window.close(), 3000);
+            </script>
+            '''
+        else:
+            return "❌ Erro na autenticação com Itaú"
+            
+    except Exception as e:
+        print(f"❌ Erro no callback: {e}")
+        return f"Erro: {str(e)}"
+
+@app.route('/importar_transacoes_itau')
+def importar_transacoes_itau():
+    """Importa transações do Itaú"""
+    try:
+        # Busca token do banco
+        conn = get_db_connection()
+        token_data = conn.execute('''SELECT access_token, expires_at FROM bancos_tokens 
+                                  WHERE banco = ? ORDER BY id DESC LIMIT 1''', 
+                               ('itau',)).fetchone()
+        conn.close()
+        
+        if not token_data or datetime.now() >= datetime.fromisoformat(token_data['expires_at']):
+            return jsonify({'error': 'Token expirado ou não encontrado. Reconecte com Itaú.'}), 401
+        
+        # Cria instância e busca transações
+        client_id = os.environ.get('ITAU_CLIENT_ID')
+        client_secret = os.environ.get('ITAU_CLIENT_SECRET')
+        
+        itau_api = ItauOpenBanking(
+            client_id=client_id,
+            client_secret=client_secret,
+            certificate_path="certificates/cert.pem",
+            private_key_path="certificates/key.pem"
+        )
+        
+        itau_api.access_token = token_data['access_token']
+        
+        # Busca contas
+        accounts = itau_api.get_accounts()
+        if not accounts:
+            return jsonify({'error': 'Não foi possível buscar contas'}), 500
+        
+        transacoes_importadas = []
+        
+        # Para cada conta, busca transações
+        for account in accounts.get('data', {}).get('brand', {}).get('accounts', []):
+            account_id = account.get('accountId')
+            transactions = itau_api.get_transactions(account_id)
+            
+            if transactions:
+                for transacao in transactions.get('data', {}).get('transactions', []):
+                    # Processa e salva transação
+                    transacao_processada = processar_transacao_itau(transacao)
+                    if transacao_processada:
+                        transacoes_importadas.append(transacao_processada)
+        
+        return jsonify({
+            'ok': True,
+            'message': f'✅ {len(transacoes_importadas)} transações importadas',
+            'transacoes': transacoes_importadas
+        })
+        
+    except Exception as e:
+        print(f"❌ Erro importar transações: {e}")
+        return jsonify({'error': str(e)}), 500
+
+def processar_transacao_itau(transacao):
+    """Processa e categoriza transação do Itaú"""
+    try:
+        descricao = transacao.get('transactionName', 'Transação Itaú')
+        valor = transacao.get('amount', 0)
+        data = transacao.get('bookingDate', '')
+        tipo = transacao.get('creditDebitType', 'DEBIT')  # DEBIT ou CREDIT
+        
+        # Define se é entrada ou gasto
+        if tipo == 'CREDIT':
+            tabela = 'entradas'
+            descricao = f"💰 {descricao}"
+        else:
+            tabela = 'gastos'
+            descricao = f"💸 {descricao}"
+        
+        # Categorização automática
+        categoria = categorizar_transacao_automacao(descricao, valor)
+        
+        # Salva no banco
+        conn = get_db_connection()
+        if tabela == 'entradas':
+            conn.execute('INSERT INTO entradas (descricao, valor, data) VALUES (?, ?, ?)',
+                       (descricao, valor, data))
+        else:
+            conn.execute('INSERT INTO gastos (descricao, categoria, valor, data) VALUES (?, ?, ?, ?)',
+                       (descricao, categoria, abs(valor), data))
+        
+        conn.commit()
+        conn.close()
+        
+        return {
+            'descricao': descricao,
+            'valor': valor,
+            'data': data,
+            'tipo': tipo,
+            'categoria': categoria
+        }
+        
+    except Exception as e:
+        print(f"❌ Erro processar transação: {e}")
+        return None
+
+def categorizar_transacao_automacao(descricao, valor):
+    """Categoriza transação automaticamente baseada na descrição"""
+    desc_lower = descricao.lower()
+    
+    categorias = {
+        'alimentacao': ['mercado', 'supermercado', 'padaria', 'restaurante', 'lanchonete', 'ifood'],
+        'transporte': ['uber', '99', 'taxi', 'posto', 'combustivel', 'estacionamento'],
+        'moradia': ['aluguel', 'condominio', 'luz', 'agua', 'energia', 'internet'],
+        'saude': ['farmacia', 'hospital', 'medico', 'plano de saude'],
+        'educacao': ['escola', 'faculdade', 'curso', 'livraria'],
+        'entretenimento': ['cinema', 'netflix', 'spotify', 'parque'],
+        'outros': []
+    }
+    
+    for categoria, palavras in categorias.items():
+        if any(palavra in desc_lower for palavra in palavras):
+            return categoria
+    
+    return 'outros'
 
 # =============================================
 # CONFIGURAÇÃO PARA RENDER
